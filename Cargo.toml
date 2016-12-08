@@ -1,0 +1,12 @@
+[package]
+name = "rplex"
+version = "0.1.0"
+authors = ["J David Smith <emallson@atlanis.net>"]
+build = "build.rs"
+links = "static=cplex"
+
+[dependencies]
+libc = "0.2.0"
+
+[build-dependencies]
+glob = "0.2"
