@@ -15,6 +15,7 @@ extern "C" {
     fn CPXopenCPLEX(status: *mut c_int) -> *mut CEnv;
     fn CPXcreateprob(env: *mut CEnv, status: *mut c_int, name: *const c_char) -> *mut CProblem;
     fn CPXsetintparam(env: *mut CEnv, param: c_int, value: c_int) -> c_int;
+    fn CPXgetintparam(env: *mut CEnv, param: c_int, value: *mut c_int) -> c_int;
     // adding variables and constraints
     fn CPXnewcols(env: *mut CEnv, lp: *mut CProblem, count: c_int,
                    obj: *const c_double, lb: *const c_double, ub: *const c_double,
@@ -39,17 +40,54 @@ extern "C" {
     // debugging
     fn CPXgeterrorstring(env: *mut CEnv, errcode: c_int, buff: *mut c_char) -> *mut c_char;
     fn CPXwriteprob(env: *mut CEnv, lp: *mut CProblem, fname: *const c_char, ftype: *const c_char) -> c_int;
+    // freeing
+    fn CPXcloseCPLEX(env: *const *mut CEnv) -> c_int;
+    fn CPXfreeprob(env: *mut CEnv, lp: *const *mut CProblem) -> c_int;
 }
 
-fn errstr(env: *mut CEnv, errcode: c_int) -> Option<String> {
+fn errstr(env: *mut CEnv, errcode: c_int) -> Result<String, String> {
     unsafe {
         let mut buf = vec![0i8; 1024];
         let res = CPXgeterrorstring(env, errcode, buf.as_mut_ptr());
         if res == std::ptr::null_mut() {
-            None
+            Err(format!("No error string for {}", errcode))
         } else {
-            Some(String::from_utf8(buf.iter().take_while(|&&i| i != 0 && i != '\n' as i8)
-                              .map(|&i| i as u8).collect::<Vec<u8>>()).unwrap())
+            Ok(String::from_utf8(buf.iter().take_while(|&&i| i != 0 && i != '\n' as i8)
+                                 .map(|&i| i as u8).collect::<Vec<u8>>()).unwrap())
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+enum ParamType {
+    Integer(c_int),
+    #[allow(dead_code)]
+    Double(c_double),
+    Boolean(c_int)
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum EnvParam {
+    Threads(u64),
+    ScreenOutput(bool),
+}
+
+impl EnvParam {
+
+    fn to_id(&self) -> c_int {
+        use EnvParam::*;
+        match self {
+            &Threads(_) => 1067,
+            &ScreenOutput(_) => 1035,
+        }
+    }
+
+    fn param_type(&self) -> ParamType {
+        use EnvParam::*;
+        use ParamType::*;
+        match self {
+            &Threads(t) => Integer(t as c_int),
+            &ScreenOutput(b) => Boolean(b as c_int),
         }
     }
 }
@@ -57,6 +95,7 @@ fn errstr(env: *mut CEnv, errcode: c_int) -> Option<String> {
 pub struct Env {
     inner: *mut CEnv
 }
+
 
 impl Env {
     pub fn new() -> Result<Env, String> {
@@ -66,12 +105,40 @@ impl Env {
             if env == std::ptr::null_mut() {
                 Err(format!("CPLEX returned NULL for CPXopenCPLEX (status: {})", status))
             } else {
-                CPXsetintparam(env, 1035, 1); //ScreenOutput
-                CPXsetintparam(env, 1056, 1); //Read_DataCheck
+                // CPXsetintparam(env, 1035, 1); //ScreenOutput
+                // CPXsetintparam(env, 1056, 1); //Read_DataCheck
                 Ok(Env {
                     inner: env
                 })
             }
+        }
+    }
+
+    pub fn set_param(&mut self, p: EnvParam) -> Result<(), String> {
+        unsafe {
+            let status = match p.param_type() {
+                ParamType::Integer(i) => CPXsetintparam(self.inner, p.to_id(), i),
+                ParamType::Boolean(b) => CPXsetintparam(self.inner, p.to_id(), b),
+                _ => unimplemented!()
+            };
+
+            if status != 0 {
+                return match errstr(self.inner, status) {
+                    Ok(s) => Err(s),
+                    Err(e) => Err(e)
+                };
+            } else {
+                return Ok(());
+            }
+        }
+    }
+
+}
+
+impl Drop for Env {
+    fn drop(&mut self) {
+        unsafe {
+            assert!(CPXcloseCPLEX (&self.inner) == 0);
         }
     }
 }
@@ -117,6 +184,7 @@ macro_rules! var {
     // typed version
     ($lb:tt <= $name:ident -> $obj:tt as $vt:path) => (var!($lb <= $name <= INFINITY -> $obj as $vt));
     ($name:ident <= $ub:tt -> $obj:tt as $vt:path) => (var!(0.0 <= $name <= INFINITY -> $obj as $vt));
+    ($name:ident -> $obj:tt as Binary) => (var!(0.0 <= $name <= 1.0 -> $obj as Binary));
     ($name:ident -> $obj:tt as $vt:path) => (var!(0.0 <= $name -> $obj as $vt));
 }
 
@@ -215,7 +283,7 @@ pub enum VariableType {
     SemiInteger,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum VariableValue {
     Continuous(f64),
     Binary(bool),
@@ -289,10 +357,7 @@ impl<'a> Problem<'a> {
                         -> Result<usize, String> {
         unsafe {
             let status = CPXnewcols(self.env.inner, self.inner, 1,
-                                    &var.obj, &var.lb, &var.ub, match var.ty {
-                                        VariableType::Continuous => std::ptr::null(),
-                                        _ => &var.ty.to_c()
-                                    },
+                                    &var.obj, &var.lb, &var.ub, &var.ty.to_c(),
                                     &CString::new(var.name).unwrap().as_ptr());
 
             if status != 0 {
@@ -359,7 +424,7 @@ impl<'a> Problem<'a> {
     pub fn solve(&mut self) -> Result<Solution, String> {
         // TODO: support multiple solution types...
         unsafe {
-            let status = CPXlpopt(self.env.inner, self.inner);
+            let status = CPXmipopt(self.env.inner, self.inner);
             if status != 0 {
                 CPXwriteprob(self.env.inner, self.inner, CString::new("lpex1.lp").unwrap().as_ptr(), std::ptr::null());
                 return Err(format!("LP Optimization failed ({} ({}))",
@@ -392,6 +457,12 @@ impl<'a> Problem<'a> {
                 }).collect::<Vec<VariableValue>>()
             });
         }
+    }
+}
+
+impl<'a> Drop for Problem<'a> {
+    fn drop(&mut self) {
+        unsafe { assert!(CPXfreeprob (self.env.inner, &self.inner) == 0); }
     }
 }
 
@@ -428,12 +499,9 @@ mod tests {
         let env = Env::new().unwrap();
         let mut prob = Problem::new(&env, "lpex1").unwrap();
         prob.set_objective_type(ObjectiveType::Maximize).unwrap();
-        let x1 = prob.add_variable(var!(0.0 <= x1 <= 40.0 -> 1.0))
-            .unwrap();
-        let x2 = prob.add_variable(var!(0.0 <= x1 -> 2.0))
-            .unwrap();
-        let x3 = prob.add_variable(var!(0.0 <= x1 -> 3.0))
-            .unwrap();
+        let x1 = prob.add_variable(var!(0.0 <= x1 <= 40.0 -> 1.0)).unwrap();
+        let x2 = prob.add_variable(var!(0.0 <= x1 -> 2.0)).unwrap();
+        let x3 = prob.add_variable(var!(0.0 <= x1 -> 3.0)).unwrap();
 
         prob.add_constraint(con!(c1: 20.0 >= (-1.0) x1 + 1.0 x2 + 1.0 x3)).unwrap();
         prob.add_constraint(con!(c2: 30.0 >= 1.0 x1 + (-3.0) x2 + 1.0 x3)).unwrap();
@@ -441,5 +509,19 @@ mod tests {
         let sol = prob.solve().unwrap();
         println!("{:?}", sol);
         assert!(sol.objective == 202.5);
+        assert!(sol.variables == vec![VariableValue::Continuous(40.0),
+                                      VariableValue::Continuous(17.5),
+                                      VariableValue::Continuous(42.5)]);
+    }
+
+    #[test]
+    #[ignore]
+    fn set_param() {
+        let mut _env = Env::new().unwrap();
+        // this is perhaps why not to use tuple structs as the enum
+        // variants for params...
+        // assert!(env.get_param(EnvParam::ScreenOutput(false)).unwrap() == false);
+        // env.set_param(EnvParam::ScreenOutput(true)).unwrap();
+        // assert!(env.get_param(EnvParam::ScreenOutput(false)).unwrap() == true);
     }
 }
