@@ -12,7 +12,8 @@ rplex = "0.1" # not actually on crates.io yet
 
 You *must* have CPLEX installed for RPLEX to work. The build script
 attempts to locate CPLEX automatically (and should do so assuming
-you've installed it at the usual location on Linux).
+you've installed it at the usual location on Linux). CPLEX is not
+necessary to run a binary compiled with RPLEX; static linking is used.
 
 *Documentation under construction*
 
