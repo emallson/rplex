@@ -1,11 +1,13 @@
 extern crate libc;
-use libc::{c_int, c_char, c_double};
+use libc::{c_int, c_char, c_double, c_long};
 use std::ffi::CString;
 
 pub const INFINITY: f64 = 1.0E+20;
 
 enum CEnv {}
 enum CProblem {}
+
+type CInt = c_int;
 
 // #[link(name="cplex", kind="static")]
 #[allow(non_snake_case)]
@@ -15,18 +17,21 @@ extern "C" {
     fn CPXopenCPLEX(status: *mut c_int) -> *mut CEnv;
     fn CPXcreateprob(env: *mut CEnv, status: *mut c_int, name: *const c_char) -> *mut CProblem;
     fn CPXsetintparam(env: *mut CEnv, param: c_int, value: c_int) -> c_int;
+    fn CPXsetdblparam(env: *mut CEnv, param: c_int, value: c_double) -> c_int;
     fn CPXgetintparam(env: *mut CEnv, param: c_int, value: *mut c_int) -> c_int;
     // adding variables and constraints
-    fn CPXnewcols(env: *mut CEnv, lp: *mut CProblem, count: c_int,
+    fn CPXnewcols(env: *mut CEnv, lp: *mut CProblem, count: CInt,
                    obj: *const c_double, lb: *const c_double, ub: *const c_double,
                    xctype: *const c_char, name: *const *const c_char) -> c_int;
     fn CPXaddrows(env: *mut CEnv, lp: *mut CProblem,
-                   col_count: c_int, row_count: c_int, nz_count: c_int,
+                   col_count: CInt, row_count: CInt, nz_count: CInt,
                    rhs: *const c_double, sense: *const c_char,
-                   rmatbeg: *const c_int, rmatind: *const c_int, rmatval: *const c_double,
+                   rmatbeg: *const CInt, rmatind: *const CInt, rmatval: *const c_double,
                    col_name: *const *const c_char, row_name: *const *const c_char) -> c_int;
+    // querying
+    fn CPXgetnumcols(env: *const CEnv, lp: *mut CProblem) -> CInt;
     // setting objective
-    fn CPXchgobj(env: *mut CEnv, lp: *mut CProblem, cnt: c_int, indices: *const c_int, values: *const c_double) -> c_int;
+    fn CPXchgobj(env: *mut CEnv, lp: *mut CProblem, cnt: CInt, indices: *const CInt, values: *const c_double) -> c_int;
     fn CPXchgobjsen(env: *mut CEnv, lp: *mut CProblem, maxormin: c_int) -> c_int;
     // solving
     fn CPXlpopt(env: *mut CEnv, lp: *mut CProblem) -> c_int;
@@ -34,7 +39,7 @@ extern "C" {
     // getting solution
     fn CPXgetstat(env: *mut CEnv, lp: *mut CProblem) -> c_int;
     fn CPXgetobjval(env: *mut CEnv, lp: *mut CProblem, objval: *mut c_double) -> c_int;
-    fn CPXgetx(env: *mut CEnv, lp: *mut CProblem, x: *mut c_double, begin: c_int, end: c_int) -> c_int;
+    fn CPXgetx(env: *mut CEnv, lp: *mut CProblem, x: *mut c_double, begin: CInt, end: CInt) -> c_int;
     fn CPXsolution(env: *mut CEnv, lp: *mut CProblem, lpstat_p: *mut c_int, objval_p: *mut c_double,
                    x: *mut c_double, pi: *mut c_double, slack: *mut c_double, dj: *mut c_double) -> c_int;
     // debugging
@@ -61,7 +66,6 @@ fn errstr(env: *mut CEnv, errcode: c_int) -> Result<String, String> {
 #[derive(Copy, Clone, Debug)]
 enum ParamType {
     Integer(c_int),
-    #[allow(dead_code)]
     Double(c_double),
     Boolean(c_int)
 }
@@ -70,6 +74,7 @@ enum ParamType {
 pub enum EnvParam {
     Threads(u64),
     ScreenOutput(bool),
+    RelativeGap(f64),
 }
 
 impl EnvParam {
@@ -79,6 +84,7 @@ impl EnvParam {
         match self {
             &Threads(_) => 1067,
             &ScreenOutput(_) => 1035,
+            &RelativeGap(_) => 2009,
         }
     }
 
@@ -88,6 +94,7 @@ impl EnvParam {
         match self {
             &Threads(t) => Integer(t as c_int),
             &ScreenOutput(b) => Boolean(b as c_int),
+            &RelativeGap(g) => Double(g as c_double),
         }
     }
 }
@@ -119,7 +126,7 @@ impl Env {
             let status = match p.param_type() {
                 ParamType::Integer(i) => CPXsetintparam(self.inner, p.to_id(), i),
                 ParamType::Boolean(b) => CPXsetintparam(self.inner, p.to_id(), b),
-                _ => unimplemented!()
+                ParamType::Double(d) => CPXsetdblparam(self.inner, p.to_id(), d),
             };
 
             if status != 0 {
@@ -144,48 +151,50 @@ impl Drop for Env {
 }
 
 #[derive(Clone, Debug)]
-pub struct Variable<'a> {
+pub struct Variable {
     index: Option<usize>,
     ty: VariableType,
     obj: f64,
     lb: f64,
     ub: f64,
-    name: &'a str
+    name: String
 }
 
-impl<'a> Variable<'a> {
-    pub fn new(ty: VariableType, obj: f64, lb: f64, ub: f64, name: &'a str) -> Variable<'a> {
+impl Variable {
+    pub fn new<S>(ty: VariableType, obj: f64, lb: f64, ub: f64, name: S) -> Variable
+        where S: Into<String> {
         Variable {
             index: None,
             ty: ty,
             obj: obj,
             lb: lb,
             ub: ub,
-            name: name
+            name: name.into()
         }
     }
 }
 
+#[macro_export]
 macro_rules! var {
-    ($lb:tt <= $name:ident <= $ub:tt -> $obj:tt as $vt:path) => {
+    ($lb:tt <= $name:tt <= $ub:tt -> $obj:tt as $vt:path) => {
         {
             use $crate::VariableType::*;
-            Variable::new ($vt, $obj, $lb, $ub, "$name")
+            Variable::new ($vt, $obj, $lb, $ub, $name)
         }
     };
     // continuous shorthand
-    ($lb:tt <= $name:ident <= $ub:tt -> $obj:tt) => (var!($lb <= $name <= $ub -> $obj as Continuous));
+    ($lb:tt <= $name:tt <= $ub:tt -> $obj:tt) => (var!($lb <= $name <= $ub -> $obj as Continuous));
     // omit either lb or ub
-    ($lb:tt <= $name:ident -> $obj:tt) => (var!($lb <= $name <= INFINITY -> $obj));
-    ($name:ident <= $ub:tt -> $obj:tt) => (var!(0.0 <= $name <= INFINITY -> $obj));
+    ($lb:tt <= $name:tt -> $obj:tt) => (var!($lb <= $name <= INFINITY -> $obj));
+    ($name:tt <= $ub:tt -> $obj:tt) => (var!(0.0 <= $name <= INFINITY -> $obj));
     // omit both
-    ($name:ident -> $obj:tt) => (var!(0.0 <= $name -> $obj));
+    ($name:tt -> $obj:tt) => (var!(0.0 <= $name -> $obj));
 
     // typed version
-    ($lb:tt <= $name:ident -> $obj:tt as $vt:path) => (var!($lb <= $name <= INFINITY -> $obj as $vt));
-    ($name:ident <= $ub:tt -> $obj:tt as $vt:path) => (var!(0.0 <= $name <= INFINITY -> $obj as $vt));
-    ($name:ident -> $obj:tt as Binary) => (var!(0.0 <= $name <= 1.0 -> $obj as Binary));
-    ($name:ident -> $obj:tt as $vt:path) => (var!(0.0 <= $name -> $obj as $vt));
+    ($lb:tt <= $name:tt -> $obj:tt as $vt:path) => (var!($lb <= $name <= INFINITY -> $obj as $vt));
+    ($name:tt <= $ub:tt -> $obj:tt as $vt:path) => (var!(0.0 <= $name <= INFINITY -> $obj as $vt));
+    ($name:tt -> $obj:tt as Binary) => (var!(0.0 <= $name <= 1.0 -> $obj as Binary));
+    ($name:tt -> $obj:tt as $vt:path) => (var!(0.0 <= $name -> $obj as $vt));
 }
 
 #[derive(Clone, Debug)]
@@ -195,7 +204,7 @@ pub struct WeightedVariable {
 }
 
 impl WeightedVariable {
-    pub fn new_var<'a>(var: &'a Variable<'a>, weight: f64) -> Self {
+    pub fn new_var(var: &Variable, weight: f64) -> Self {
         WeightedVariable {
             var: var.index.unwrap(),
             weight: weight
@@ -211,22 +220,24 @@ impl WeightedVariable {
 }
 
 #[derive(Clone, Debug)]
-pub struct Constraint<'a> {
+pub struct Constraint {
     index: Option<usize>,
     vars: Vec<WeightedVariable>,
     ty: ConstraintType,
     rhs: f64,
-    name: &'a str,
+    name: String
 }
 
-impl<'a> Constraint<'a> {
-    pub fn new(ty: ConstraintType, rhs: f64, name: &'a str) -> Constraint<'a> {
+impl Constraint {
+    pub fn new<S, F>(ty: ConstraintType, rhs: F, name: S) -> Constraint
+        where S: Into<String>,
+              F: Into<f64> {
         Constraint {
             index: None,
             vars: vec![],
             ty: ty,
-            rhs: rhs,
-            name: name
+            rhs: rhs.into(),
+            name: name.into()
         }
     }
 
@@ -235,15 +246,40 @@ impl<'a> Constraint<'a> {
     }
 }
 
+#[macro_export]
+#[doc(hidden)]
 macro_rules! con_ty {
     (=) => ($crate::ConstraintType::Eq);
     (>=) => ($crate::ConstraintType::LessThanEq);
+    (<=) => ($crate::ConstraintType::GreaterThanEq);
 }
 
+/// Macro to simplify writing constraints. In the future, this should
+/// be made recursive to improve flexibility rather than repeatedly
+/// adding special cases.
+#[macro_export]
 macro_rules! con {
-    ($name:ident : $rhs:tt $cmp:tt $c1:tt $x1:ident $(+ $c:tt $x:ident)*) => {
+    ($name:tt : $rhs:tt $cmp:tt sum $body:expr) => {
         {
-            let mut con = Constraint::new(con_ty!($cmp), $rhs, "$name");
+            let mut con = Constraint::new(con_ty!($cmp), $rhs, $name);
+            for &var in $body {
+                con.add_wvar(WeightedVariable::new_idx(var, 1.0));
+            }
+            con
+        }
+    };
+    ($name:tt : $rhs:tt $cmp:tt wsum $body:expr) => {
+        {
+            let mut con = Constraint::new(con_ty!($cmp), $rhs, $name);
+            for (var, weight) in $body {
+                con.add_wvar(WeightedVariable::new_idx(var, weight));
+            }
+            con
+        }
+    };
+    ($name:tt : $rhs:tt $cmp:tt $c1:tt $x1:ident $(+ $c:tt $x:ident)*) => {
+        {
+            let mut con = Constraint::new(con_ty!($cmp), $rhs, $name);
             con.add_wvar(WeightedVariable::new_idx($x1, $c1));
             $(
                 con.add_wvar(WeightedVariable::new_idx($x, $c));
@@ -256,16 +292,16 @@ macro_rules! con {
 pub struct Problem<'a> {
     inner: *mut CProblem,
     pub env: &'a Env,
-    pub name: &'a str,
-    variables: Vec<Variable<'a>>,
-    constraints: Vec<Constraint<'a>>
+    pub name: String,
+    variables: Vec<Variable>,
+    constraints: Vec<Constraint>
 }
 
 
 #[derive(Clone, Debug)]
 pub struct Solution {
-    objective: f64,
-    variables: Vec<VariableValue>
+    pub objective: f64,
+    pub variables: Vec<VariableValue>
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -287,9 +323,9 @@ pub enum VariableType {
 pub enum VariableValue {
     Continuous(f64),
     Binary(bool),
-    Integer(i64),
+    Integer(CInt),
     SemiContinuous(f64),
-    SemiInteger(i64)
+    SemiInteger(CInt)
 }
 
 
@@ -334,10 +370,12 @@ impl ObjectiveType {
 }
 
 impl<'a> Problem<'a> {
-    pub fn new(env: &'a Env, name: &'a str) -> Result<Problem<'a>, String> {
+    pub fn new<S>(env: &'a Env, name: S) -> Result<Self, String>
+        where S: Into<String> {
         unsafe {
             let mut status = 0;
-            let prob = CPXcreateprob(env.inner, &mut status, CString::new(name).unwrap().as_ptr());
+            let name = name.into();
+            let prob = CPXcreateprob(env.inner, &mut status, CString::new(name.as_str()).unwrap().as_ptr());
             if prob == std::ptr::null_mut() {
                 Err(format!("CPLEX returned NULL for CPXcreateprob ({} ({}))",
                             errstr(env.inner, status).unwrap(), status))
@@ -353,34 +391,34 @@ impl<'a> Problem<'a> {
         }
     }
 
-    pub fn add_variable(&mut self, var: Variable<'a>)
+    pub fn add_variable(&mut self, var: Variable)
                         -> Result<usize, String> {
         unsafe {
             let status = CPXnewcols(self.env.inner, self.inner, 1,
                                     &var.obj, &var.lb, &var.ub, &var.ty.to_c(),
-                                    &CString::new(var.name).unwrap().as_ptr());
+                                    &CString::new(var.name.as_str()).unwrap().as_ptr());
 
             if status != 0 {
                 Err(format!("Failed to add {:?} variable {} ({} ({}))",
                             var.ty, var.name, errstr(self.env.inner, status).unwrap(), status))
             } else {
-                let index = self.variables.len();
+                let index = CPXgetnumcols(self.env.inner, self.inner) as usize - 1;
                 self.variables.push(Variable { index: Some(index), ..var });
                 Ok(index)
             }
         }
     }
 
-    pub fn add_constraint(&mut self, con: Constraint<'a>) -> Result<usize, String> {
-        let (ind, val): (Vec<i32>, Vec<f64>) = con.vars.iter()
+    pub fn add_constraint(&mut self, con: Constraint) -> Result<usize, String> {
+        let (ind, val): (Vec<CInt>, Vec<f64>) = con.vars.iter()
             .filter(|wv| wv.weight != 0.0)
-            .map(|wv| (wv.var as i32, wv.weight)).unzip();
-        let nz = val.len() as i32;
+            .map(|wv| (wv.var as CInt, wv.weight)).unzip();
+        let nz = val.len() as CInt;
         unsafe {
             let status = CPXaddrows(self.env.inner, self.inner,
                                     0, 1, nz, &con.rhs,
                                     &con.ty.to_c(), &0, ind.as_ptr(), val.as_ptr(),
-                                    std::ptr::null(), &CString::new(con.name).unwrap().as_ptr());
+                                    std::ptr::null(), &CString::new(con.name.as_str()).unwrap().as_ptr());
 
             if status != 0 {
                 Err(format!("Failed to add {:?} constraint {} ({} ({}))",
@@ -393,12 +431,12 @@ impl<'a> Problem<'a> {
         }
     }
 
-    pub fn set_objective(&mut self, ty: ObjectiveType, con: Constraint<'a>) -> Result<(), String> {
-        let (ind, val): (Vec<i32>, Vec<f64>) = con.vars.iter()
-            .map(|wv| (wv.var as i32, wv.weight)).unzip();
+    pub fn set_objective(&mut self, ty: ObjectiveType, con: Constraint) -> Result<(), String> {
+        let (ind, val): (Vec<CInt>, Vec<f64>) = con.vars.iter()
+            .map(|wv| (wv.var as CInt, wv.weight)).unzip();
         unsafe {
             let status = CPXchgobj(self.env.inner, self.inner,
-                                   con.vars.len() as c_int, ind.as_ptr(), val.as_ptr());
+                                   con.vars.len() as CInt, ind.as_ptr(), val.as_ptr());
 
             if status != 0 {
                 Err(format!("Failed to set objective weights ({} ({}))",
@@ -415,6 +453,23 @@ impl<'a> Problem<'a> {
             if status != 0 {
                 Err(format!("Failed to set objective type to {:?} ({} ({}))",
                             ty, errstr(self.env.inner, status).unwrap(), status))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    pub fn write<S>(&self, name: S) -> Result<(), String>
+        where S: Into<String>{
+        unsafe {
+            let status = CPXwriteprob(self.env.inner, self.inner,
+                                      CString::new(name.into().as_str()).unwrap().as_ptr(),
+                                      std::ptr::null());
+            if status != 0 {
+                return match errstr(self.env.inner, status) {
+                    Ok(s) => Err(s),
+                    Err(e) => Err(e)
+                };
             } else {
                 Ok(())
             }
@@ -440,7 +495,7 @@ impl<'a> Problem<'a> {
             }
 
             let mut xs = vec![0f64; self.variables.len()];
-            let status = CPXgetx(self.env.inner, self.inner, xs.as_mut_ptr(), 0, self.variables.len() as c_int - 1);
+            let status = CPXgetx(self.env.inner, self.inner, xs.as_mut_ptr(), 0, self.variables.len() as CInt - 1);
             if status != 0 {
                 return Err(format!("Failed to retrieve values for variables ({} ({}))",
                                    errstr(self.env.inner, status).unwrap(), status));
@@ -451,9 +506,9 @@ impl<'a> Problem<'a> {
                 variables: xs.iter().zip(self.variables.iter()).map(|(&x, v)| match v.ty {
                     VariableType::Binary => VariableValue::Binary(x == 1.0),
                     VariableType::Continuous => VariableValue::Continuous(x),
-                    VariableType::Integer => VariableValue::Integer(x as i64),
+                    VariableType::Integer => VariableValue::Integer(x as CInt),
                     VariableType::SemiContinuous => VariableValue::SemiContinuous(x),
-                    VariableType::SemiInteger => VariableValue::SemiInteger(x as i64),
+                    VariableType::SemiInteger => VariableValue::SemiInteger(x as CInt),
                 }).collect::<Vec<VariableValue>>()
             });
         }
@@ -499,13 +554,15 @@ mod tests {
         let env = Env::new().unwrap();
         let mut prob = Problem::new(&env, "lpex1").unwrap();
         prob.set_objective_type(ObjectiveType::Maximize).unwrap();
-        let x1 = prob.add_variable(var!(0.0 <= x1 <= 40.0 -> 1.0)).unwrap();
-        let x2 = prob.add_variable(var!(0.0 <= x1 -> 2.0)).unwrap();
-        let x3 = prob.add_variable(var!(0.0 <= x1 -> 3.0)).unwrap();
+        let x1 = prob.add_variable(var!(0.0 <= "x1" <= 40.0 -> 1.0)).unwrap();
+        let x2 = prob.add_variable(var!("x2" -> 2.0)).unwrap();
+        let x3 = prob.add_variable(var!("x3" -> 3.0)).unwrap();
+        println!("{} {} {}", x1, x2, x3);
 
-        prob.add_constraint(con!(c1: 20.0 >= (-1.0) x1 + 1.0 x2 + 1.0 x3)).unwrap();
-        prob.add_constraint(con!(c2: 30.0 >= 1.0 x1 + (-3.0) x2 + 1.0 x3)).unwrap();
+        prob.add_constraint(con!("c1": 20.0 >= (-1.0) x1 + 1.0 x2 + 1.0 x3)).unwrap();
+        prob.add_constraint(con!("c2": 30.0 >= 1.0 x1 + (-3.0) x2 + 1.0 x3)).unwrap();
 
+        prob.write("lpex1_test.lp").unwrap();
         let sol = prob.solve().unwrap();
         println!("{:?}", sol);
         assert!(sol.objective == 202.5);
