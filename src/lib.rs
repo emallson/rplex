@@ -1,7 +1,8 @@
 extern crate libc;
-use libc::{c_int, c_char, c_double, c_long};
+use libc::{c_int, c_char, c_double};
 use std::ffi::CString;
 
+/// Used by CPLEX to represent a variable that has no upper bound.
 pub const INFINITY: f64 = 1.0E+20;
 
 enum CEnv {}
@@ -99,6 +100,8 @@ impl EnvParam {
     }
 }
 
+/// A CPLEX Environment. An `Env` is necessary to create a
+/// `Problem`.
 pub struct Env {
     inner: *mut CEnv
 }
@@ -121,6 +124,15 @@ impl Env {
         }
     }
 
+    /// Set an environment parameter. e.g.
+    ///
+    /// ```
+    /// use rplex::{Env, EnvParam};
+    ///
+    /// let mut env = Env::new().unwrap();
+    /// env.set_param(EnvParam::ScreenOutput(true)).unwrap();
+    /// env.set_param(EnvParam::RelativeGap(0.01)).unwrap();
+    /// ```
     pub fn set_param(&mut self, p: EnvParam) -> Result<(), String> {
         unsafe {
             let status = match p.param_type() {
@@ -150,6 +162,26 @@ impl Drop for Env {
     }
 }
 
+/// A Variable in a Problem.
+///
+/// The general usage pattern is to create Variables outside of a
+/// Problem with `var!(...)` and then add them to the Problem with
+/// `prob.add_variable(...)`.
+///
+/// ```
+/// #[macro_use]
+/// extern crate rplex;
+///
+/// use rplex::{Env, Problem, Variable};
+///
+/// fn main() {
+///     let env = Env::new().unwrap();
+///     let mut prob = Problem::new(&env, "dummy").unwrap();
+///     prob.add_variable(var!("x" -> 4.0 as Binary)).unwrap();
+///     prob.add_variable(var!(0.0 <= "y" <= 100.0  -> 3.0 as Integer)).unwrap();
+///     prob.add_variable(var!(0.0 <= "z" <= 4.5 -> 2.0)).unwrap();
+/// }
+/// ```
 #[derive(Clone, Debug)]
 pub struct Variable {
     index: Option<usize>,
@@ -174,12 +206,19 @@ impl Variable {
     }
 }
 
+/// Expressive creation of variables.
+///
+/// The general syntax is:
+///
+/// `var!(lower <= "name" <= upper -> objective as type)`
+///
+/// See `Variable` for examples.
 #[macro_export]
 macro_rules! var {
     ($lb:tt <= $name:tt <= $ub:tt -> $obj:tt as $vt:path) => {
         {
             use $crate::VariableType::*;
-            Variable::new ($vt, $obj, $lb, $ub, $name)
+            $crate::Variable::new ($vt, $obj, $lb, $ub, $name)
         }
     };
     // continuous shorthand
@@ -197,6 +236,8 @@ macro_rules! var {
     ($name:tt -> $obj:tt as $vt:path) => (var!(0.0 <= $name -> $obj as $vt));
 }
 
+/// A variable with weight (row) coefficient. Used in the construction
+/// of `Constraint`s.
 #[derive(Clone, Debug)]
 pub struct WeightedVariable {
     var: usize,
@@ -204,6 +245,8 @@ pub struct WeightedVariable {
 }
 
 impl WeightedVariable {
+    /// Create a `WeightedVariable` from a `Variable`. Does not keep a
+    /// borrowed copy of `var`.
     pub fn new_var(var: &Variable, weight: f64) -> Self {
         WeightedVariable {
             var: var.index.unwrap(),
@@ -211,6 +254,10 @@ impl WeightedVariable {
         }
     }
 
+    /// Create a `WeightedVariable` from a column index. This method
+    /// is used by the `con!` macro, as the return value of
+    /// `prob.add_variable` is a column index and thus the most common
+    /// value.
     pub fn new_idx(idx: usize, weight: f64) -> Self {
         WeightedVariable {
             var: idx,
@@ -219,6 +266,57 @@ impl WeightedVariable {
     }
 }
 
+/// A Constraint (row) object for a `Problem`.
+///
+/// The recommended way to build these is with the `con!` macro.
+///
+/// ```
+/// #[macro_use]
+/// extern crate rplex;
+///
+/// use rplex::{Env, Problem, Variable};
+///
+/// fn main() {
+///     let env = Env::new().unwrap();
+///     let mut prob = Problem::new(&env, "dummy").unwrap();
+///     let x = prob.add_variable(var!("x" -> 4.0 as Binary)).unwrap();
+///     let y = prob.add_variable(var!(0.0 <= "y" <= 100.0  -> 3.0 as Integer)).unwrap();
+///     let z = prob.add_variable(var!(0.0 <= "z" <= 4.5 -> 2.0)).unwrap();
+///     prob.add_constraint(con!("dummy": 20.0 = 1.0 x + 2.0 y + 3.0 z)).unwrap();
+///     prob.add_constraint(con!("dummy2": 1.0 <= (-1.0) x + 1.0 y)).unwrap();
+/// }
+/// ```
+///
+/// However, constraints can also be constructed manually from
+/// `WeightedVariables`. This can be useful if your constraints don't
+/// quite fit the grammar allowed by the `con!` macro. You can create
+/// part of the constraint using `con!`, then augment it with
+/// `add_wvar` to obtain the constraint you need.The following example
+/// is identical to the above.
+///
+/// ```
+/// #[macro_use]
+/// extern crate rplex;
+///
+/// use rplex::{Env, Problem, Constraint, ConstraintType, WeightedVariable};
+///
+/// fn main() {
+///     let env = Env::new().unwrap();
+///     let mut prob = Problem::new(&env, "dummy").unwrap();
+///     let x = prob.add_variable(var!("x" -> 4.0 as Binary)).unwrap();
+///     let y = prob.add_variable(var!(0.0 <= "y" <= 100.0  -> 3.0 as Integer)).unwrap();
+///     let z = prob.add_variable(var!(0.0 <= "z" <= 4.5 -> 2.0)).unwrap();
+///     let mut dummy = Constraint::new(ConstraintType::Eq, 20.0, "dummy");
+///     dummy.add_wvar(WeightedVariable::new_idx(x, 1.0));
+///     dummy.add_wvar(WeightedVariable::new_idx(y, 2.0));
+///     dummy.add_wvar(WeightedVariable::new_idx(z, 3.0));
+///     prob.add_constraint(dummy).unwrap();
+///     let mut dummy2 = Constraint::new(ConstraintType::GreaterThanEq, 1.0, "dummy2");
+///     dummy2.add_wvar(WeightedVariable::new_idx(x, -1.0));
+///     dummy2.add_wvar(WeightedVariable::new_idx(y, 1.0));
+///     prob.add_constraint(dummy2).unwrap();
+/// }
+/// ```
 #[derive(Clone, Debug)]
 pub struct Constraint {
     index: Option<usize>,
@@ -241,6 +339,7 @@ impl Constraint {
         }
     }
 
+    /// Move a `WeightedVariable` into the Constraint.
     pub fn add_wvar(&mut self, wvar: WeightedVariable) {
         self.vars.push(wvar)
     }
@@ -254,53 +353,74 @@ macro_rules! con_ty {
     (<=) => ($crate::ConstraintType::GreaterThanEq);
 }
 
-/// Macro to simplify writing constraints. In the future, this should
-/// be made recursive to improve flexibility rather than repeatedly
-/// adding special cases.
+/// Expressive macro for writing constraints.
+///
+/// Typical syntax looks like one of:
+///
+/// `con!("name": rhs <=/=/=> w1 v1 + w2 v2 + ...)`
+///
+/// `con!("name": rhs <=/=/=> sum Iter<Item=Variable Index>)`
+///
+/// `con!("name": rhs <=/=/=> wsum Iter<Item=(Weight, Variable Index)>)`
+///
+/// In the future, this should be made recursive to improve
+/// flexibility rather than repeatedly adding special cases.
 #[macro_export]
 macro_rules! con {
     ($name:tt : $rhs:tt $cmp:tt sum $body:expr) => {
         {
-            let mut con = Constraint::new(con_ty!($cmp), $rhs, $name);
+            let mut con = $crate::Constraint::new(con_ty!($cmp), $rhs, $name);
             for &var in $body {
-                con.add_wvar(WeightedVariable::new_idx(var, 1.0));
+                con.add_wvar($crate::WeightedVariable::new_idx(var, 1.0));
             }
             con
         }
     };
     ($name:tt : $rhs:tt $cmp:tt wsum $body:expr) => {
         {
-            let mut con = Constraint::new(con_ty!($cmp), $rhs, $name);
+            let mut con = $crate::Constraint::new(con_ty!($cmp), $rhs, $name);
             for (var, weight) in $body {
-                con.add_wvar(WeightedVariable::new_idx(var, weight));
+                con.add_wvar($crate::WeightedVariable::new_idx(var, weight));
             }
             con
         }
     };
     ($name:tt : $rhs:tt $cmp:tt $c1:tt $x1:ident $(+ $c:tt $x:ident)*) => {
         {
-            let mut con = Constraint::new(con_ty!($cmp), $rhs, $name);
-            con.add_wvar(WeightedVariable::new_idx($x1, $c1));
+            let mut con = $crate::Constraint::new(con_ty!($cmp), $rhs, $name);
+            con.add_wvar($crate::WeightedVariable::new_idx($x1, $c1));
             $(
-                con.add_wvar(WeightedVariable::new_idx($x, $c));
+                con.add_wvar($crate::WeightedVariable::new_idx($x, $c));
             )*
             con
         }
     };
 }
 
+/// A CPLEX Problem.
+#[allow(dead_code)]
 pub struct Problem<'a> {
     inner: *mut CProblem,
-    pub env: &'a Env,
-    pub name: String,
+    /// The Environment to which the Problem belongs.
+    env: &'a Env,
+    /// The name of the problem.
+    name: String,
     variables: Vec<Variable>,
     constraints: Vec<Constraint>
 }
 
 
+/// Solution to a CPLEX Problem.
+///
+/// Currently, there is no way to select which variables are extracted
+/// when using `prob.solve()`. I am currently unfamiliar with the C
+/// API for managing variables that remain unbound in the solution,
+/// and so am unsure how to represent them.
 #[derive(Clone, Debug)]
 pub struct Solution {
+    /// The value of the objective reached by CPLEX.
     pub objective: f64,
+    /// The values bound to each variable.
     pub variables: Vec<VariableValue>
 }
 
@@ -315,7 +435,9 @@ pub enum VariableType {
     Continuous,
     Binary,
     Integer,
+    /// A variable bounded by `[lb, ub]` or equal to 0.
     SemiContinuous,
+    /// An integer variable bounded by `[lb, ub]` or equal to 0.
     SemiInteger,
 }
 
@@ -329,11 +451,17 @@ pub enum VariableValue {
 }
 
 
+/// Kind of (in)equality of a Constraint.
+///
+/// Note that the direction of the inequality is *opposite* what one
+/// might expect from the `con!` macro. This is because the right- and
+/// left-hand sides are flipped in the macro.
 #[derive(Copy, Clone, Debug)]
 pub enum ConstraintType {
     LessThanEq,
     Eq,
     GreaterThanEq,
+    /// `Ranged` is currently unimplemented.
     Ranged,
 }
 
@@ -391,6 +519,11 @@ impl<'a> Problem<'a> {
         }
     }
 
+    /// Add a variable to the problem. The Variable is **moved** into
+    /// the problem. At this time, it is not possible to get a
+    /// reference to it back.
+    ///
+    /// The column index for the Variable is returned.
     pub fn add_variable(&mut self, var: Variable)
                         -> Result<usize, String> {
         unsafe {
@@ -409,6 +542,11 @@ impl<'a> Problem<'a> {
         }
     }
 
+    /// Add a constraint to the problem. The Constraint is **moved**
+    /// into the problem. At this time, it is not possible to get a
+    /// reference to it back.
+    ///
+    /// The row index for the constraint is returned.
     pub fn add_constraint(&mut self, con: Constraint) -> Result<usize, String> {
         let (ind, val): (Vec<CInt>, Vec<f64>) = con.vars.iter()
             .filter(|wv| wv.weight != 0.0)
@@ -431,6 +569,10 @@ impl<'a> Problem<'a> {
         }
     }
 
+    /// Set the objective coefficients. A Constraint object is used
+    /// because it encodes a weighted sum, although it is semantically
+    /// incorrect. The right-hand-side and kind of (in)equality of the
+    /// Constraint are ignored.
     pub fn set_objective(&mut self, ty: ObjectiveType, con: Constraint) -> Result<(), String> {
         let (ind, val): (Vec<CInt>, Vec<f64>) = con.vars.iter()
             .map(|wv| (wv.var as CInt, wv.weight)).unzip();
@@ -447,6 +589,11 @@ impl<'a> Problem<'a> {
         }
     }
 
+    /// Change the objective type. Default: `ObjectiveType::Minimize`.
+    ///
+    /// It is recommended to use this in conjunction with objective
+    /// coefficients set by the `var!` macro rather than using
+    /// `set_objective`.
     pub fn set_objective_type(&mut self, ty: ObjectiveType) -> Result<(), String> {
         unsafe {
             let status = CPXchgobjsen(self.env.inner, self.inner, ty.to_c());
@@ -459,6 +606,9 @@ impl<'a> Problem<'a> {
         }
     }
 
+    /// Write the problem to a file named `name`. At this time, it is
+    /// not possible to use a `Write` object instead, as this calls C
+    /// code directly.
     pub fn write<S>(&self, name: S) -> Result<(), String>
         where S: Into<String>{
         unsafe {
@@ -476,6 +626,8 @@ impl<'a> Problem<'a> {
         }
     }
 
+    /// Solve the Problem, returning a `Solution` object with the
+    /// result.
     pub fn solve(&mut self) -> Result<Solution, String> {
         // TODO: support multiple solution types...
         unsafe {
