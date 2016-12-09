@@ -49,7 +49,7 @@ fn lpex1() {
 ```
 
 (Translated from the CPLEX example code `lpex1.c`. Taken from an
-[actual test](src/lib.rs))
+[actual test](src/lib.rs#L704-724))
 
 # License
 
