@@ -21,18 +21,37 @@ extern "C" {
     fn CPXsetdblparam(env: *mut CEnv, param: c_int, value: c_double) -> c_int;
     fn CPXgetintparam(env: *mut CEnv, param: c_int, value: *mut c_int) -> c_int;
     // adding variables and constraints
-    fn CPXnewcols(env: *mut CEnv, lp: *mut CProblem, count: CInt,
-                   obj: *const c_double, lb: *const c_double, ub: *const c_double,
-                   xctype: *const c_char, name: *const *const c_char) -> c_int;
-    fn CPXaddrows(env: *mut CEnv, lp: *mut CProblem,
-                   col_count: CInt, row_count: CInt, nz_count: CInt,
-                   rhs: *const c_double, sense: *const c_char,
-                   rmatbeg: *const CInt, rmatind: *const CInt, rmatval: *const c_double,
-                   col_name: *const *const c_char, row_name: *const *const c_char) -> c_int;
+    fn CPXnewcols(env: *mut CEnv,
+                  lp: *mut CProblem,
+                  count: CInt,
+                  obj: *const c_double,
+                  lb: *const c_double,
+                  ub: *const c_double,
+                  xctype: *const c_char,
+                  name: *const *const c_char)
+                  -> c_int;
+    fn CPXaddrows(env: *mut CEnv,
+                  lp: *mut CProblem,
+                  col_count: CInt,
+                  row_count: CInt,
+                  nz_count: CInt,
+                  rhs: *const c_double,
+                  sense: *const c_char,
+                  rmatbeg: *const CInt,
+                  rmatind: *const CInt,
+                  rmatval: *const c_double,
+                  col_name: *const *const c_char,
+                  row_name: *const *const c_char)
+                  -> c_int;
     // querying
     fn CPXgetnumcols(env: *const CEnv, lp: *mut CProblem) -> CInt;
     // setting objective
-    fn CPXchgobj(env: *mut CEnv, lp: *mut CProblem, cnt: CInt, indices: *const CInt, values: *const c_double) -> c_int;
+    fn CPXchgobj(env: *mut CEnv,
+                 lp: *mut CProblem,
+                 cnt: CInt,
+                 indices: *const CInt,
+                 values: *const c_double)
+                 -> c_int;
     fn CPXchgobjsen(env: *mut CEnv, lp: *mut CProblem, maxormin: c_int) -> c_int;
     // solving
     fn CPXlpopt(env: *mut CEnv, lp: *mut CProblem) -> c_int;
@@ -40,12 +59,28 @@ extern "C" {
     // getting solution
     fn CPXgetstat(env: *mut CEnv, lp: *mut CProblem) -> c_int;
     fn CPXgetobjval(env: *mut CEnv, lp: *mut CProblem, objval: *mut c_double) -> c_int;
-    fn CPXgetx(env: *mut CEnv, lp: *mut CProblem, x: *mut c_double, begin: CInt, end: CInt) -> c_int;
-    fn CPXsolution(env: *mut CEnv, lp: *mut CProblem, lpstat_p: *mut c_int, objval_p: *mut c_double,
-                   x: *mut c_double, pi: *mut c_double, slack: *mut c_double, dj: *mut c_double) -> c_int;
+    fn CPXgetx(env: *mut CEnv,
+               lp: *mut CProblem,
+               x: *mut c_double,
+               begin: CInt,
+               end: CInt)
+               -> c_int;
+    fn CPXsolution(env: *mut CEnv,
+                   lp: *mut CProblem,
+                   lpstat_p: *mut c_int,
+                   objval_p: *mut c_double,
+                   x: *mut c_double,
+                   pi: *mut c_double,
+                   slack: *mut c_double,
+                   dj: *mut c_double)
+                   -> c_int;
     // debugging
     fn CPXgeterrorstring(env: *mut CEnv, errcode: c_int, buff: *mut c_char) -> *mut c_char;
-    fn CPXwriteprob(env: *mut CEnv, lp: *mut CProblem, fname: *const c_char, ftype: *const c_char) -> c_int;
+    fn CPXwriteprob(env: *mut CEnv,
+                    lp: *mut CProblem,
+                    fname: *const c_char,
+                    ftype: *const c_char)
+                    -> c_int;
     // freeing
     fn CPXcloseCPLEX(env: *const *mut CEnv) -> c_int;
     fn CPXfreeprob(env: *mut CEnv, lp: *const *mut CProblem) -> c_int;
@@ -58,8 +93,11 @@ fn errstr(env: *mut CEnv, errcode: c_int) -> Result<String, String> {
         if res == std::ptr::null_mut() {
             Err(format!("No error string for {}", errcode))
         } else {
-            Ok(String::from_utf8(buf.iter().take_while(|&&i| i != 0 && i != '\n' as i8)
-                                 .map(|&i| i as u8).collect::<Vec<u8>>()).unwrap())
+            Ok(String::from_utf8(buf.iter()
+                    .take_while(|&&i| i != 0 && i != '\n' as i8)
+                    .map(|&i| i as u8)
+                    .collect::<Vec<u8>>())
+                .unwrap())
         }
     }
 }
@@ -68,7 +106,7 @@ fn errstr(env: *mut CEnv, errcode: c_int) -> Result<String, String> {
 enum ParamType {
     Integer(c_int),
     Double(c_double),
-    Boolean(c_int)
+    Boolean(c_int),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -76,16 +114,19 @@ pub enum EnvParam {
     Threads(u64),
     ScreenOutput(bool),
     RelativeGap(f64),
+    /// When true, set CPX_PARALLEL_DETERMINISTIC (default). When false, set
+    /// CPX_PARALLEL_OPPORTUNISTIC.
+    ParallelDeterministic(bool),
 }
 
 impl EnvParam {
-
     fn to_id(&self) -> c_int {
         use EnvParam::*;
         match self {
             &Threads(_) => 1067,
             &ScreenOutput(_) => 1035,
             &RelativeGap(_) => 2009,
+            &ParallelDeterministic(_) => 1109,
         }
     }
 
@@ -96,6 +137,7 @@ impl EnvParam {
             &Threads(t) => Integer(t as c_int),
             &ScreenOutput(b) => Boolean(b as c_int),
             &RelativeGap(g) => Double(g as c_double),
+            &ParallelDeterministic(b) => Integer(if b { 1 } else { -1 }),
         }
     }
 }
@@ -103,7 +145,7 @@ impl EnvParam {
 /// A CPLEX Environment. An `Env` is necessary to create a
 /// `Problem`.
 pub struct Env {
-    inner: *mut CEnv
+    inner: *mut CEnv,
 }
 
 
@@ -117,9 +159,7 @@ impl Env {
             } else {
                 // CPXsetintparam(env, 1035, 1); //ScreenOutput
                 // CPXsetintparam(env, 1056, 1); //Read_DataCheck
-                Ok(Env {
-                    inner: env
-                })
+                Ok(Env { inner: env })
             }
         }
     }
@@ -144,20 +184,19 @@ impl Env {
             if status != 0 {
                 return match errstr(self.inner, status) {
                     Ok(s) => Err(s),
-                    Err(e) => Err(e)
+                    Err(e) => Err(e),
                 };
             } else {
                 return Ok(());
             }
         }
     }
-
 }
 
 impl Drop for Env {
     fn drop(&mut self) {
         unsafe {
-            assert!(CPXcloseCPLEX (&self.inner) == 0);
+            assert!(CPXcloseCPLEX(&self.inner) == 0);
         }
     }
 }
@@ -189,19 +228,20 @@ pub struct Variable {
     obj: f64,
     lb: f64,
     ub: f64,
-    name: String
+    name: String,
 }
 
 impl Variable {
     pub fn new<S>(ty: VariableType, obj: f64, lb: f64, ub: f64, name: S) -> Variable
-        where S: Into<String> {
+        where S: Into<String>
+    {
         Variable {
             index: None,
             ty: ty,
             obj: obj,
             lb: lb,
             ub: ub,
-            name: name.into()
+            name: name.into(),
         }
     }
 }
@@ -241,7 +281,7 @@ macro_rules! var {
 #[derive(Clone, Debug)]
 pub struct WeightedVariable {
     var: usize,
-    weight: f64
+    weight: f64,
 }
 
 impl WeightedVariable {
@@ -250,7 +290,7 @@ impl WeightedVariable {
     pub fn new_var(var: &Variable, weight: f64) -> Self {
         WeightedVariable {
             var: var.index.unwrap(),
-            weight: weight
+            weight: weight,
         }
     }
 
@@ -261,7 +301,7 @@ impl WeightedVariable {
     pub fn new_idx(idx: usize, weight: f64) -> Self {
         WeightedVariable {
             var: idx,
-            weight: weight
+            weight: weight,
         }
     }
 }
@@ -323,19 +363,20 @@ pub struct Constraint {
     vars: Vec<WeightedVariable>,
     ty: ConstraintType,
     rhs: f64,
-    name: String
+    name: String,
 }
 
 impl Constraint {
     pub fn new<S, F>(ty: ConstraintType, rhs: F, name: S) -> Constraint
         where S: Into<String>,
-              F: Into<f64> {
+              F: Into<f64>
+    {
         Constraint {
             index: None,
             vars: vec![],
             ty: ty,
             rhs: rhs.into(),
-            name: name.into()
+            name: name.into(),
         }
     }
 
@@ -406,7 +447,7 @@ pub struct Problem<'a> {
     /// The name of the problem.
     name: String,
     variables: Vec<Variable>,
-    constraints: Vec<Constraint>
+    constraints: Vec<Constraint>,
 }
 
 
@@ -421,13 +462,13 @@ pub struct Solution {
     /// The value of the objective reached by CPLEX.
     pub objective: f64,
     /// The values bound to each variable.
-    pub variables: Vec<VariableValue>
+    pub variables: Vec<VariableValue>,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum ObjectiveType {
     Maximize,
-    Minimize
+    Minimize,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -447,7 +488,7 @@ pub enum VariableValue {
     Binary(bool),
     Integer(CInt),
     SemiContinuous(f64),
-    SemiInteger(CInt)
+    SemiInteger(CInt),
 }
 
 
@@ -483,7 +524,7 @@ impl ConstraintType {
             &ConstraintType::LessThanEq => 'L' as c_char,
             &ConstraintType::Eq => 'E' as c_char,
             &ConstraintType::GreaterThanEq => 'G' as c_char,
-            &ConstraintType::Ranged => unimplemented!()
+            &ConstraintType::Ranged => unimplemented!(),
         }
     }
 }
@@ -492,28 +533,32 @@ impl ObjectiveType {
     fn to_c(&self) -> c_int {
         match self {
             &ObjectiveType::Minimize => 1 as c_int,
-            &ObjectiveType::Maximize => -1 as c_int
+            &ObjectiveType::Maximize => -1 as c_int,
         }
     }
 }
 
 impl<'a> Problem<'a> {
     pub fn new<S>(env: &'a Env, name: S) -> Result<Self, String>
-        where S: Into<String> {
+        where S: Into<String>
+    {
         unsafe {
             let mut status = 0;
             let name = name.into();
-            let prob = CPXcreateprob(env.inner, &mut status, CString::new(name.as_str()).unwrap().as_ptr());
+            let prob = CPXcreateprob(env.inner,
+                                     &mut status,
+                                     CString::new(name.as_str()).unwrap().as_ptr());
             if prob == std::ptr::null_mut() {
                 Err(format!("CPLEX returned NULL for CPXcreateprob ({} ({}))",
-                            errstr(env.inner, status).unwrap(), status))
+                            errstr(env.inner, status).unwrap(),
+                            status))
             } else {
                 Ok(Problem {
                     inner: prob,
                     env: env,
                     name: name,
                     variables: vec![],
-                    constraints: vec![]
+                    constraints: vec![],
                 })
             }
         }
@@ -524,16 +569,23 @@ impl<'a> Problem<'a> {
     /// reference to it back.
     ///
     /// The column index for the Variable is returned.
-    pub fn add_variable(&mut self, var: Variable)
-                        -> Result<usize, String> {
+    pub fn add_variable(&mut self, var: Variable) -> Result<usize, String> {
         unsafe {
-            let status = CPXnewcols(self.env.inner, self.inner, 1,
-                                    &var.obj, &var.lb, &var.ub, &var.ty.to_c(),
+            let status = CPXnewcols(self.env.inner,
+                                    self.inner,
+                                    1,
+                                    &var.obj,
+                                    &var.lb,
+                                    &var.ub,
+                                    &var.ty.to_c(),
                                     &CString::new(var.name.as_str()).unwrap().as_ptr());
 
             if status != 0 {
                 Err(format!("Failed to add {:?} variable {} ({} ({}))",
-                            var.ty, var.name, errstr(self.env.inner, status).unwrap(), status))
+                            var.ty,
+                            var.name,
+                            errstr(self.env.inner, status).unwrap(),
+                            status))
             } else {
                 let index = CPXgetnumcols(self.env.inner, self.inner) as usize - 1;
                 self.variables.push(Variable { index: Some(index), ..var });
@@ -548,19 +600,32 @@ impl<'a> Problem<'a> {
     ///
     /// The row index for the constraint is returned.
     pub fn add_constraint(&mut self, con: Constraint) -> Result<usize, String> {
-        let (ind, val): (Vec<CInt>, Vec<f64>) = con.vars.iter()
+        let (ind, val): (Vec<CInt>, Vec<f64>) = con.vars
+            .iter()
             .filter(|wv| wv.weight != 0.0)
-            .map(|wv| (wv.var as CInt, wv.weight)).unzip();
+            .map(|wv| (wv.var as CInt, wv.weight))
+            .unzip();
         let nz = val.len() as CInt;
         unsafe {
-            let status = CPXaddrows(self.env.inner, self.inner,
-                                    0, 1, nz, &con.rhs,
-                                    &con.ty.to_c(), &0, ind.as_ptr(), val.as_ptr(),
-                                    std::ptr::null(), &CString::new(con.name.as_str()).unwrap().as_ptr());
+            let status = CPXaddrows(self.env.inner,
+                                    self.inner,
+                                    0,
+                                    1,
+                                    nz,
+                                    &con.rhs,
+                                    &con.ty.to_c(),
+                                    &0,
+                                    ind.as_ptr(),
+                                    val.as_ptr(),
+                                    std::ptr::null(),
+                                    &CString::new(con.name.as_str()).unwrap().as_ptr());
 
             if status != 0 {
                 Err(format!("Failed to add {:?} constraint {} ({} ({}))",
-                            con.ty, con.name, errstr(self.env.inner, status).unwrap(), status))
+                            con.ty,
+                            con.name,
+                            errstr(self.env.inner, status).unwrap(),
+                            status))
             } else {
                 let index = self.constraints.len();
                 self.constraints.push(Constraint { index: Some(index), ..con });
@@ -574,15 +639,21 @@ impl<'a> Problem<'a> {
     /// incorrect. The right-hand-side and kind of (in)equality of the
     /// Constraint are ignored.
     pub fn set_objective(&mut self, ty: ObjectiveType, con: Constraint) -> Result<(), String> {
-        let (ind, val): (Vec<CInt>, Vec<f64>) = con.vars.iter()
-            .map(|wv| (wv.var as CInt, wv.weight)).unzip();
+        let (ind, val): (Vec<CInt>, Vec<f64>) = con.vars
+            .iter()
+            .map(|wv| (wv.var as CInt, wv.weight))
+            .unzip();
         unsafe {
-            let status = CPXchgobj(self.env.inner, self.inner,
-                                   con.vars.len() as CInt, ind.as_ptr(), val.as_ptr());
+            let status = CPXchgobj(self.env.inner,
+                                   self.inner,
+                                   con.vars.len() as CInt,
+                                   ind.as_ptr(),
+                                   val.as_ptr());
 
             if status != 0 {
                 Err(format!("Failed to set objective weights ({} ({}))",
-                            errstr(self.env.inner, status).unwrap(), status))
+                            errstr(self.env.inner, status).unwrap(),
+                            status))
             } else {
                 self.set_objective_type(ty)
             }
@@ -599,7 +670,9 @@ impl<'a> Problem<'a> {
             let status = CPXchgobjsen(self.env.inner, self.inner, ty.to_c());
             if status != 0 {
                 Err(format!("Failed to set objective type to {:?} ({} ({}))",
-                            ty, errstr(self.env.inner, status).unwrap(), status))
+                            ty,
+                            errstr(self.env.inner, status).unwrap(),
+                            status))
             } else {
                 Ok(())
             }
@@ -610,15 +683,17 @@ impl<'a> Problem<'a> {
     /// not possible to use a `Write` object instead, as this calls C
     /// code directly.
     pub fn write<S>(&self, name: S) -> Result<(), String>
-        where S: Into<String>{
+        where S: Into<String>
+    {
         unsafe {
-            let status = CPXwriteprob(self.env.inner, self.inner,
+            let status = CPXwriteprob(self.env.inner,
+                                      self.inner,
                                       CString::new(name.into().as_str()).unwrap().as_ptr(),
                                       std::ptr::null());
             if status != 0 {
                 return match errstr(self.env.inner, status) {
                     Ok(s) => Err(s),
-                    Err(e) => Err(e)
+                    Err(e) => Err(e),
                 };
             } else {
                 Ok(())
@@ -633,35 +708,51 @@ impl<'a> Problem<'a> {
         unsafe {
             let status = CPXmipopt(self.env.inner, self.inner);
             if status != 0 {
-                CPXwriteprob(self.env.inner, self.inner, CString::new("lpex1.lp").unwrap().as_ptr(), std::ptr::null());
+                CPXwriteprob(self.env.inner,
+                             self.inner,
+                             CString::new("lpex1.lp").unwrap().as_ptr(),
+                             std::ptr::null());
                 return Err(format!("LP Optimization failed ({} ({}))",
-                                   errstr(self.env.inner, status).unwrap(), status));
+                                   errstr(self.env.inner, status).unwrap(),
+                                   status));
             }
 
             let mut objval: f64 = 0.0;
             let status = CPXgetobjval(self.env.inner, self.inner, &mut objval);
             if status != 0 {
-                CPXwriteprob(self.env.inner, self.inner, CString::new("lpex1.lp").unwrap().as_ptr(), std::ptr::null());
+                CPXwriteprob(self.env.inner,
+                             self.inner,
+                             CString::new("lpex1.lp").unwrap().as_ptr(),
+                             std::ptr::null());
                 return Err(format!("Failed to retrieve objective value ({} ({}))",
-                                   errstr(self.env.inner, status).unwrap(), status));
+                                   errstr(self.env.inner, status).unwrap(),
+                                   status));
             }
 
             let mut xs = vec![0f64; self.variables.len()];
-            let status = CPXgetx(self.env.inner, self.inner, xs.as_mut_ptr(), 0, self.variables.len() as CInt - 1);
+            let status = CPXgetx(self.env.inner,
+                                 self.inner,
+                                 xs.as_mut_ptr(),
+                                 0,
+                                 self.variables.len() as CInt - 1);
             if status != 0 {
                 return Err(format!("Failed to retrieve values for variables ({} ({}))",
-                                   errstr(self.env.inner, status).unwrap(), status));
+                                   errstr(self.env.inner, status).unwrap(),
+                                   status));
             }
 
             return Ok(Solution {
                 objective: objval,
-                variables: xs.iter().zip(self.variables.iter()).map(|(&x, v)| match v.ty {
-                    VariableType::Binary => VariableValue::Binary(x == 1.0),
-                    VariableType::Continuous => VariableValue::Continuous(x),
-                    VariableType::Integer => VariableValue::Integer(x as CInt),
-                    VariableType::SemiContinuous => VariableValue::SemiContinuous(x),
-                    VariableType::SemiInteger => VariableValue::SemiInteger(x as CInt),
-                }).collect::<Vec<VariableValue>>()
+                variables: xs.iter()
+                    .zip(self.variables.iter())
+                    .map(|(&x, v)| match v.ty {
+                        VariableType::Binary => VariableValue::Binary(x == 1.0),
+                        VariableType::Continuous => VariableValue::Continuous(x),
+                        VariableType::Integer => VariableValue::Integer(x as CInt),
+                        VariableType::SemiContinuous => VariableValue::SemiContinuous(x),
+                        VariableType::SemiInteger => VariableValue::SemiInteger(x as CInt),
+                    })
+                    .collect::<Vec<VariableValue>>(),
             });
         }
     }
@@ -669,7 +760,9 @@ impl<'a> Problem<'a> {
 
 impl<'a> Drop for Problem<'a> {
     fn drop(&mut self) {
-        unsafe { assert!(CPXfreeprob (self.env.inner, &self.inner) == 0); }
+        unsafe {
+            assert!(CPXfreeprob(self.env.inner, &self.inner) == 0);
+        }
     }
 }
 
@@ -698,7 +791,7 @@ mod tests {
             .unwrap();
         let mut con = Constraint::new(ConstraintType::LessThanEq, 20.0, "c1");
         con.add_wvar(WeightedVariable::new_idx(var_idx, -1.0));
-        prob.add_constraint (con).unwrap ();
+        prob.add_constraint(con).unwrap();
     }
 
     #[test]
