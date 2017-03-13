@@ -506,6 +506,12 @@ pub enum ConstraintType {
     Ranged,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum ProblemType {
+    Linear,
+    MixedInteger,
+}
+
 impl VariableType {
     fn to_c(&self) -> c_char {
         match self {
@@ -703,10 +709,13 @@ impl<'a> Problem<'a> {
 
     /// Solve the Problem, returning a `Solution` object with the
     /// result.
-    pub fn solve(&mut self) -> Result<Solution, String> {
+    pub fn solve_as(&mut self, pt: ProblemType) -> Result<Solution, String> {
         // TODO: support multiple solution types...
         unsafe {
-            let status = CPXmipopt(self.env.inner, self.inner);
+            let status = match pt {
+                ProblemType::MixedInteger => CPXmipopt(self.env.inner, self.inner),
+                ProblemType::Linear => CPXlpopt(self.env.inner, self.inner),
+            };
             if status != 0 {
                 CPXwriteprob(self.env.inner,
                              self.inner,
@@ -755,6 +764,11 @@ impl<'a> Problem<'a> {
                     .collect::<Vec<VariableValue>>(),
             });
         }
+    }
+
+    /// Solve the problem as a Mixed Integer Program
+    pub fn solve(&mut self) -> Result<Solution, String> {
+        self.solve_as(ProblemType::MixedInteger)
     }
 }
 
