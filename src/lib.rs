@@ -20,6 +20,7 @@ extern "C" {
     fn CPXsetintparam(env: *mut CEnv, param: c_int, value: c_int) -> c_int;
     fn CPXsetdblparam(env: *mut CEnv, param: c_int, value: c_double) -> c_int;
     fn CPXgetintparam(env: *mut CEnv, param: c_int, value: *mut c_int) -> c_int;
+    fn CPXchgprobtype(env: *mut CEnv, lp: *mut CProblem, ptype: c_int) -> c_int;
     // adding variables and constraints
     fn CPXnewcols(env: *mut CEnv,
                   lp: *mut CProblem,
@@ -506,7 +507,7 @@ pub enum ConstraintType {
     Ranged,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ProblemType {
     Linear,
     MixedInteger,
@@ -712,6 +713,15 @@ impl<'a> Problem<'a> {
     pub fn solve_as(&mut self, pt: ProblemType) -> Result<Solution, String> {
         // TODO: support multiple solution types...
         unsafe {
+            if pt == ProblemType::Linear {
+                let status = CPXchgprobtype(self.env.inner, self.inner, 0);
+
+                if status != 0 {
+                    return Err(format!("Failed to convert to LP problem ({} ({}))",
+                                       errstr(self.env.inner, status).unwrap(),
+                                       status));
+                }
+            }
             let status = match pt {
                 ProblemType::MixedInteger => CPXmipopt(self.env.inner, self.inner),
                 ProblemType::Linear => CPXlpopt(self.env.inner, self.inner),
@@ -823,6 +833,27 @@ mod tests {
 
         prob.write("lpex1_test.lp").unwrap();
         let sol = prob.solve().unwrap();
+        println!("{:?}", sol);
+        assert!(sol.objective == 202.5);
+        assert!(sol.variables == vec![VariableValue::Continuous(40.0),
+                                      VariableValue::Continuous(17.5),
+                                      VariableValue::Continuous(42.5)]);
+    }
+
+    #[test]
+    fn lpex1_linear() {
+        let env = Env::new().unwrap();
+        let mut prob = Problem::new(&env, "lpex1").unwrap();
+        prob.set_objective_type(ObjectiveType::Maximize).unwrap();
+        let x1 = prob.add_variable(var!(0.0 <= "x1" <= 40.0 -> 1.0)).unwrap();
+        let x2 = prob.add_variable(var!("x2" -> 2.0)).unwrap();
+        let x3 = prob.add_variable(var!("x3" -> 3.0)).unwrap();
+        println!("{} {} {}", x1, x2, x3);
+
+        prob.add_constraint(con!("c1": 20.0 >= (-1.0) x1 + 1.0 x2 + 1.0 x3)).unwrap();
+        prob.add_constraint(con!("c2": 30.0 >= 1.0 x1 + (-3.0) x2 + 1.0 x3)).unwrap();
+
+        let sol = prob.solve_as(ProblemType::Linear).unwrap();
         println!("{:?}", sol);
         assert!(sol.objective == 202.5);
         assert!(sol.variables == vec![VariableValue::Continuous(40.0),
