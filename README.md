@@ -15,7 +15,7 @@ attempts to locate CPLEX automatically (and should do so assuming
 you've installed it at the usual location on Linux). CPLEX is not
 necessary to run a binary compiled with RPLEX; static linking is used.
 
-*Documentation under construction*
+[Documentation](http://atlanis.net/doc/rs/rplex/)
 
 # Example
 
