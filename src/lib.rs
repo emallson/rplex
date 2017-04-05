@@ -451,42 +451,69 @@ macro_rules! con_ty {
 
 /// Expressive macro for writing constraints.
 ///
-/// Typical syntax looks like one of:
+/// # Examples
+/// ## Basic Form: Explicit sum of variables
+/// ```
+/// # #[macro_use]
+/// # extern crate rplex;
+/// # fn main() {
+/// let x1 = 1; let x2 = 2;
+/// con!("basic": 0.0 <= 1.0 x1 + (-1.0) x2);
+/// # }
+/// ```
+/// ## Basic Form: Unweighted sum of variables
+/// ```
+/// # #[macro_use]
+/// # extern crate rplex;
+/// # fn main() {
+/// let xs = vec![1, 2];
+/// con!("basic sum": 0.0 >= sum (&xs));
+/// # }
+/// ```
+/// ## Basic Form: Weighted sum of variables
+/// ```
+/// # #[macro_use]
+/// # extern crate rplex;
+/// # fn main() {
+/// let xs = vec![(1, 1.0), (2, -1.0)];
+/// con!("basic weighted sum": 0.0 = wsum (&xs));
+/// # }
+/// ```
 ///
-/// `con!("name": rhs <=/=/=> w1 v1 + w2 v2 + ...)`
+/// ## Mixed Forms
+/// These can be mixed at will, separated by `+`.
 ///
-/// `con!("name": rhs <=/=/=> sum Iter<Item=Variable Index>)`
-///
-/// `con!("name": rhs <=/=/=> wsum Iter<Item=(Weight, Variable Index)>)`
-///
-/// In the future, this should be made recursive to improve
-/// flexibility rather than repeatedly adding special cases.
+/// ```
+/// # #[macro_use]
+/// # extern crate rplex;
+/// # fn main() {
+/// let x1 = 1; let x2 = 2;
+/// let ys = vec![3, 4];
+/// let zs = vec![(5, 1.0), (6, -1.0)];
+/// con!("mixed sum": 0.0 <= 1.0 x1 + (-1.0) x2 + sum (&ys) + wsum (&zs));
+/// # }
+/// ```
 #[macro_export]
 macro_rules! con {
-    ($name:tt : $rhs:tt $cmp:tt sum $body:expr) => {
-        {
-            let mut con = $crate::Constraint::new(con_ty!($cmp), $rhs, $name);
-            for &var in $body {
-                con.add_wvar($crate::WeightedVariable::new_idx(var, 1.0));
-            }
-            con
+    (@inner $con:ident sum $body:expr) => {
+        for &var in $body {
+            $con.add_wvar($crate::WeightedVariable::new_idx(var, 1.0));
         }
     };
-    ($name:tt : $rhs:tt $cmp:tt wsum $body:expr) => {
-        {
-            let mut con = $crate::Constraint::new(con_ty!($cmp), $rhs, $name);
-            for (var, weight) in $body {
-                con.add_wvar($crate::WeightedVariable::new_idx(var, weight));
-            }
-            con
+    (@inner $con:ident wsum $body:expr) => {
+        for &(var, weight) in $body {
+            $con.add_wvar($crate::WeightedVariable::new_idx(var, weight));
         }
     };
-    ($name:tt : $rhs:tt $cmp:tt $c1:tt $x1:ident $(+ $c:tt $x:ident)*) => {
+    (@inner $con:ident $weight:tt $var:expr) => {
+        $con.add_wvar($crate::WeightedVariable::new_idx($var, $weight));
+    };
+    ($name:tt : $rhs:tt $cmp:tt $c1:tt $x1:tt $(+ $c:tt $x:tt)*) => {
         {
             let mut con = $crate::Constraint::new(con_ty!($cmp), $rhs, $name);
-            con.add_wvar($crate::WeightedVariable::new_idx($x1, $c1));
+            con!(@inner con $c1 $x1);
             $(
-                con.add_wvar($crate::WeightedVariable::new_idx($x, $c));
+                con!(@inner con $c $x);
             )*
             con
         }

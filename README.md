@@ -7,7 +7,7 @@ working for IP/MIP problems.
 
 ```toml
 [dependencies]
-rplex = "0.1" # not actually on crates.io yet
+rplex = {version = "0.2", git = "https://github.com/emallson/rplex.git"} 
 ```
 
 You *must* have CPLEX installed for RPLEX to work. The build script
