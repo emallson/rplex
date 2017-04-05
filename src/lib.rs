@@ -44,6 +44,17 @@ extern "C" {
                   col_name: *const *const c_char,
                   row_name: *const *const c_char)
                   -> c_int;
+    fn CPXaddlazyconstraints(env: *mut CEnv,
+                             lp: *mut CProblem,
+                             row_count: CInt,
+                             nz_count: CInt,
+                             rhs: *const c_double,
+                             sense: *const c_char,
+                             rmatbeg: *const CInt,
+                             rmatind: *const CInt,
+                             rmatval: *const c_double,
+                             row_name: *const *const c_char)
+                             -> c_int;
     // querying
     fn CPXgetnumcols(env: *const CEnv, lp: *mut CProblem) -> CInt;
     // setting objective
@@ -449,6 +460,7 @@ pub struct Problem<'a> {
     name: String,
     variables: Vec<Variable>,
     constraints: Vec<Constraint>,
+    lazy_constraints: Vec<Constraint>,
 }
 
 
@@ -566,6 +578,7 @@ impl<'a> Problem<'a> {
                     name: name,
                     variables: vec![],
                     constraints: vec![],
+                    lazy_constraints: vec![],
                 })
             }
         }
@@ -601,9 +614,7 @@ impl<'a> Problem<'a> {
         }
     }
 
-    /// Add a constraint to the problem. The Constraint is **moved**
-    /// into the problem. At this time, it is not possible to get a
-    /// reference to it back.
+    /// Add a constraint to the problem.
     ///
     /// The row index for the constraint is returned.
     pub fn add_constraint(&mut self, con: Constraint) -> Result<usize, String> {
@@ -635,6 +646,42 @@ impl<'a> Problem<'a> {
                             status))
             } else {
                 let index = self.constraints.len();
+                self.constraints.push(Constraint { index: Some(index), ..con });
+                Ok(index)
+            }
+        }
+    }
+
+    /// Adds a lazy constraint to the problem.
+    ///
+    /// Returns the index of the constraint. Unclear if this has any value whatsoever.
+    pub fn add_lazy_constraint(&mut self, con: Constraint) -> Result<usize, String> {
+        let (ind, val): (Vec<CInt>, Vec<f64>) = con.vars
+            .iter()
+            .filter(|wv| wv.weight != 0.0)
+            .map(|wv| (wv.var as CInt, wv.weight))
+            .unzip();
+        let nz = val.len() as CInt;
+        unsafe {
+            let status = CPXaddlazyconstraints(self.env.inner,
+                                               self.inner,
+                                               1,
+                                               nz,
+                                               &con.rhs,
+                                               &con.ty.to_c(),
+                                               &0,
+                                               ind.as_ptr(),
+                                               val.as_ptr(),
+                                               &CString::new(con.name.as_str()).unwrap().as_ptr());
+
+            if status != 0 {
+                Err(format!("Failed to add {:?} constraint {} ({} ({}))",
+                            con.ty,
+                            con.name,
+                            errstr(self.env.inner, status).unwrap(),
+                            status))
+            } else {
+                let index = self.lazy_constraints.len();
                 self.constraints.push(Constraint { index: Some(index), ..con });
                 Ok(index)
             }
@@ -854,6 +901,27 @@ mod tests {
         prob.add_constraint(con!("c2": 30.0 >= 1.0 x1 + (-3.0) x2 + 1.0 x3)).unwrap();
 
         let sol = prob.solve_as(ProblemType::Linear).unwrap();
+        println!("{:?}", sol);
+        assert!(sol.objective == 202.5);
+        assert!(sol.variables == vec![VariableValue::Continuous(40.0),
+                                      VariableValue::Continuous(17.5),
+                                      VariableValue::Continuous(42.5)]);
+    }
+
+    #[test]
+    fn lpex1_lazy() {
+        let env = Env::new().unwrap();
+        let mut prob = Problem::new(&env, "lpex1").unwrap();
+        prob.set_objective_type(ObjectiveType::Maximize).unwrap();
+        let x1 = prob.add_variable(var!(0.0 <= "x1" <= 40.0 -> 1.0)).unwrap();
+        let x2 = prob.add_variable(var!("x2" -> 2.0)).unwrap();
+        let x3 = prob.add_variable(var!("x3" -> 3.0)).unwrap();
+        println!("{} {} {}", x1, x2, x3);
+
+        prob.add_constraint(con!("c1": 20.0 >= (-1.0) x1 + 1.0 x2 + 1.0 x3)).unwrap();
+        prob.add_lazy_constraint(con!("c2": 30.0 >= 1.0 x1 + (-3.0) x2 + 1.0 x3)).unwrap();
+
+        let sol = prob.solve().unwrap();
         println!("{:?}", sol);
         assert!(sol.objective == 202.5);
         assert!(sol.variables == vec![VariableValue::Continuous(40.0),
