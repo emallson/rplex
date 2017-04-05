@@ -1,3 +1,46 @@
+//! A Rust interface to IBM [CPLEX](https://www.ibm.com/support/knowledgecenter/SSSA5P_12.6.0/ilog.odms.cplex.help/refcallablelibrary/homepageCrefman.html).
+//!
+//! During build, the default location is checked for a CPLEX installation. If yours is
+//! installed outside of the default location, set the `CPLEX_LIB` environment variable to the
+//! appropriate path.
+//!
+//! # Examples
+//! Usage patterns will mirror C++ relatively closely, with the exception that in most cases
+//! instead of applying copious operator overloading, instead macros are used.
+//!
+//! To be honest, I'm still not sure if that's a win or loss.
+//!
+//! ```rust
+//! extern crate rplex;
+//! use rplex::*;
+//!
+//! fn main() {
+//!     // create a CPLEX environment
+//!     let env = Env::new().unwrap();
+//!     // populate it with a problem
+//!     let mut prob = Problem::new(&env, "lpex1").unwrap();
+//!     // maximize the objective
+//!     prob.set_objective_type(ObjectiveType::Maximize).unwrap();
+//!     // create our variables
+//!     let x1 = prob.add_variable(var!(0.0 <= "x1" <= 40.0 -> 1.0)).unwrap();
+//!     let x2 = prob.add_variable(var!("x2" -> 2.0)).unwrap();
+//!     let x3 = prob.add_variable(var!("x3" -> 3.0)).unwrap();
+//!     println!("{} {} {}", x1, x2, x3);
+//!
+//!     // add our constraints
+//!     prob.add_constraint(con!("c1": 20.0 >= (-1.0) x1 + 1.0 x2 + 1.0 x3)).unwrap();
+//!     prob.add_constraint(con!("c2": 30.0 >= 1.0 x1 + (-3.0) x2 + 1.0 x3)).unwrap();
+//!
+//!     // solve the problem
+//!     let sol = prob.solve().unwrap();
+//!     println!("{:?}", sol);
+//!     // values taken from the output of `lpex1.c`
+//!     assert!(sol.objective == 202.5);
+//!     assert!(sol.variables == vec![VariableValue::Continuous(40.0),
+//!                                     VariableValue::Continuous(17.5),
+//!                                     VariableValue::Continuous(42.5)]);
+//! }
+//! ```
 extern crate libc;
 use libc::{c_int, c_char, c_double};
 use std::ffi::CString;
