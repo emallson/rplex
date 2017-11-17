@@ -129,6 +129,17 @@ extern "C" {
                    slack: *mut c_double,
                    dj: *mut c_double)
                    -> c_int;
+    // adding initial solution
+    fn CPXaddmipstarts(env: *mut CEnv,
+                       lp: *mut CProblem,
+                       mcnt: CInt,
+                       nzcnt: CInt,
+                       beg: *const CInt,
+                       varindices: *const CInt,
+                       values: *const c_double,
+                       effortlevel: *const CInt,
+                       mipstartname: *const *const c_char)
+                       -> c_int;
     // debugging
     fn CPXgeterrorstring(env: *mut CEnv, errcode: c_int, buff: *mut c_char) -> *mut c_char;
     fn CPXwriteprob(env: *mut CEnv,
@@ -825,6 +836,34 @@ impl<'a> Problem<'a> {
         }
     }
 
+    /// Add an initial solution to the problem.
+    ///
+    /// `vars` is an array of indices (i.e. the result of `prob.add_variable`) and `values` are
+    /// their values.
+    pub fn add_initial_soln(&mut self, vars: &[usize], values: &[f64]) -> Result<(), String> {
+        assert!(values.len() == vars.len());
+        let vars = vars.into_iter().map(|&u| u as CInt).collect::<Vec<_>>();
+        unsafe {
+            let status = CPXaddmipstarts(self.env.inner,
+                                         self.inner,
+                                         1,
+                                         vars.len() as CInt,
+                                         &0,
+                                         vars.as_ptr(),
+                                         values.as_ptr(),
+                                         &0,
+                                         &std::ptr::null());
+            if status != 0 {
+                return match errstr(self.env.inner, status) {
+                    Ok(s) => Err(s),
+                    Err(e) => Err(e),
+                };
+            } else {
+                Ok(())
+            }
+        }
+    }
+
     /// Solve the Problem, returning a `Solution` object with the
     /// result.
     pub fn solve_as(&mut self, pt: ProblemType) -> Result<Solution, String> {
@@ -991,6 +1030,28 @@ mod tests {
         prob.add_constraint(con!("c1": 20.0 >= (-1.0) x1 + 1.0 x2 + 1.0 x3)).unwrap();
         prob.add_lazy_constraint(con!("c2": 30.0 >= 1.0 x1 + (-3.0) x2 + 1.0 x3)).unwrap();
 
+        let sol = prob.solve().unwrap();
+        println!("{:?}", sol);
+        assert!(sol.objective == 202.5);
+        assert!(sol.variables == vec![VariableValue::Continuous(40.0),
+                                      VariableValue::Continuous(17.5),
+                                      VariableValue::Continuous(42.5)]);
+    }
+
+    #[test]
+    fn lpex1_start() {
+        let env = Env::new().unwrap();
+        let mut prob = Problem::new(&env, "lpex1").unwrap();
+        prob.set_objective_type(ObjectiveType::Maximize).unwrap();
+        let x1 = prob.add_variable(var!(0.0 <= "x1" <= 40.0 -> 1.0)).unwrap();
+        let x2 = prob.add_variable(var!("x2" -> 2.0)).unwrap();
+        let x3 = prob.add_variable(var!("x3" -> 3.0)).unwrap();
+        println!("{} {} {}", x1, x2, x3);
+
+        prob.add_constraint(con!("c1": 20.0 >= (-1.0) x1 + 1.0 x2 + 1.0 x3)).unwrap();
+        prob.add_constraint(con!("c2": 30.0 >= 1.0 x1 + (-3.0) x2 + 1.0 x3)).unwrap();
+
+        prob.add_initial_soln(&[x1, x3], &[40.0, 42.5]).unwrap();
         let sol = prob.solve().unwrap();
         println!("{:?}", sol);
         assert!(sol.objective == 202.5);
