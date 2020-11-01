@@ -331,13 +331,13 @@ macro_rules! var {
     ($lb:tt <= $name:tt <= $ub:tt -> $obj:tt) => (var!($lb <= $name <= $ub -> $obj as Continuous));
     // omit either lb or ub
     ($lb:tt <= $name:tt -> $obj:tt) => (var!($lb <= $name <= INFINITY -> $obj));
-    ($name:tt <= $ub:tt -> $obj:tt) => (var!(0.0 <= $name <= INFINITY -> $obj));
+    ($name:tt <= $ub:tt -> $obj:tt) => (var!(0.0 <= $name <= $ub -> $obj));
     // omit both
     ($name:tt -> $obj:tt) => (var!(0.0 <= $name -> $obj));
 
     // typed version
     ($lb:tt <= $name:tt -> $obj:tt as $vt:path) => (var!($lb <= $name <= INFINITY -> $obj as $vt));
-    ($name:tt <= $ub:tt -> $obj:tt as $vt:path) => (var!(0.0 <= $name <= INFINITY -> $obj as $vt));
+    ($name:tt <= $ub:tt -> $obj:tt as $vt:path) => (var!(0.0 <= $name <= $ub -> $obj as $vt));
     ($name:tt -> $obj:tt as Binary) => (var!(0.0 <= $name <= 1.0 -> $obj as Binary));
     ($name:tt -> $obj:tt as $vt:path) => (var!(0.0 <= $name -> $obj as $vt));
 }
