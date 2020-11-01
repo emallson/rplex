@@ -1,6 +1,6 @@
 [package]
 name = "rplex"
-version = "0.2.3"
+version = "0.2.4"
 authors = ["J David Smith <emallson@atlanis.net>"]
 build = "build.rs"
 links = "static=cplex"
