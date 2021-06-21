@@ -17,6 +17,10 @@ necessary to run a binary compiled with RPLEX; static linking is used.
 
 [Documentation](http://atlanis.net/doc/rs/rplex/)
 
+## !!Warning!!
+
+There is an issue with the `var!` macro which has not been resolved where it cannot distinguish between `var!(lb <= name)` and `var!(name <= ub)` shorthands (see  https://github.com/emallson/rplex/issues/3). These will eventually be removed, but I no longer have a copy of CPLEX available to use in supporting RPLEX.
+
 # Example
 
 ```rust
@@ -49,7 +53,7 @@ fn lpex1() {
 ```
 
 (Translated from the CPLEX example code `lpex1.c`. Taken from an
-[actual test](src/lib.rs#L704-L724))
+[actual test](src/lib.rs))
 
 # License
 
