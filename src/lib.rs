@@ -915,13 +915,13 @@ impl<'a> Problem<'a> {
                                    errstr(self.env.inner, status).unwrap(),
                                    status));
             }
-
+            let eps: f64 = f32::EPSILON as f64;
             return Ok(Solution {
                 objective: objval,
                 variables: xs.iter()
                     .zip(self.variables.iter())
                     .map(|(&x, v)| match v.ty {
-                        VariableType::Binary => VariableValue::Binary(x <= 1.0 + f64::EPSILON && x >= 1.0 - f64::EPSILON),
+                        VariableType::Binary => VariableValue::Binary(x <= 1.0 + eps && x >= 1.0 - eps),
                         VariableType::Continuous => VariableValue::Continuous(x),
                         VariableType::Integer => VariableValue::Integer(x as CInt),
                         VariableType::SemiContinuous => VariableValue::SemiContinuous(x),
