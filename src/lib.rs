@@ -921,7 +921,7 @@ impl<'a> Problem<'a> {
                 variables: xs.iter()
                     .zip(self.variables.iter())
                     .map(|(&x, v)| match v.ty {
-                        VariableType::Binary => VariableValue::Binary(x <= 1.0 + f32::EPSILON && x >= 1.0 - f32::EPSILON),
+                        VariableType::Binary => VariableValue::Binary(x <= 1.0 + f64::EPSILON && x >= 1.0 - f64::EPSILON),
                         VariableType::Continuous => VariableValue::Continuous(x),
                         VariableType::Integer => VariableValue::Integer(x as CInt),
                         VariableType::SemiContinuous => VariableValue::SemiContinuous(x),
