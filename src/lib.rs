@@ -47,6 +47,8 @@ use std::ffi::CString;
 
 /// Used by CPLEX to represent a variable that has no upper bound.
 pub const INFINITY: f64 = 1.0E+20;
+pub const EPINT_ID: c_int = 2010;  // identifier of integrality tolerance parameter 'EpInt'
+pub const EPINT: c_double = 1e-5;  // default value for 'EpInt'
 
 enum CEnv {}
 enum CProblem {}
@@ -63,6 +65,7 @@ extern "C" {
     fn CPXsetintparam(env: *mut CEnv, param: c_int, value: c_int) -> c_int;
     fn CPXsetdblparam(env: *mut CEnv, param: c_int, value: c_double) -> c_int;
     fn CPXgetintparam(env: *mut CEnv, param: c_int, value: *mut c_int) -> c_int;
+    fn CPXgetdblparam(env: *mut CEnv, param: c_int, value: *mut c_double) -> c_int;
     fn CPXchgprobtype(env: *mut CEnv, lp: *mut CProblem, ptype: c_int) -> c_int;
     // adding variables and constraints
     fn CPXnewcols(env: *mut CEnv,
@@ -915,7 +918,8 @@ impl<'a> Problem<'a> {
                                    errstr(self.env.inner, status).unwrap(),
                                    status));
             }
-            let eps: f64 = f32::EPSILON as f64;
+            let mut eps= EPINT;
+            CPXgetdblparam(self.env.inner, EPINT_ID, &mut eps);
             return Ok(Solution {
                 objective: objval,
                 variables: xs.iter()
